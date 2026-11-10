@@ -199,6 +199,7 @@ class ControlScreen(Screen):
     def run_hardware_test(self, bus_speed: int, test_mode: str) -> None:
         # Get I2CBridge instance as simply "controller"
         controller = self.app.controller
+        progress_bar = self.query_one("#progress-bar", ProgressBar)
 
         try:
             # Set the bus speed, corresponding to user selection.
@@ -248,7 +249,6 @@ class ControlScreen(Screen):
                 total_packets = 1000
 
                 # Set progress to 0.
-                progress_bar = self.query_one("#progress-bar", ProgressBar)
                 self.app.call_from_thread(progress_bar.update, total=total_packets, progress=0)
 
                 self.app.call_from_thread(self.log_message, f"Running BER test ({total_packets} iterations) at {bus_speed} kHz. Press stop to abort early.")
@@ -269,7 +269,7 @@ class ControlScreen(Screen):
                 if "stats" in locals():
                     self.app.call_from_thread(self.log_message,
                         f"[bold]RESULTS:[/bold]\n"
-                        f"Number of Tests:                      {stats['total_pakcets_sent']}\n"
+                        f"Number of Tests:                      {stats['total_packets_sent']}\n"
                         f"      -> of which [green]passed[/green]:             {stats['passed_packets']}\n"
                         f"      -> of which [red]failed[/red]              {stats['failed_packets']}\n"
                         f"Packet Error Rate:                    {stats['packet_error_rate']:.2%}\n"

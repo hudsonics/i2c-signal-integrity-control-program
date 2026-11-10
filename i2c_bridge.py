@@ -35,21 +35,22 @@ class I2CBridge:
 
     # Writes a random 16 byte payload to a random EEPROM address, then reads it back to verify.
     def single_rw_test(self):
+        # Generate random payload.
+        PAYLOAD_LENGTH = 16 # Bytes
+        random_payload = random.randbytes(PAYLOAD_LENGTH)
+        
         # Randomly generate EEPROM address to write to / read from.
         # EEPROM address space is organised in 64 byte pages:
         #   -> 32KB total, so 512 pages of 64 bytes.
         PAGE_SIZE = 64 # Bytes
         TOTAL_MEMORY = 32 # KB
-        MAX_PAGE_INDEX = ((TOTAL_MEMORY * 1024) / PAGE_SIZE) - 1 # 512 pages, indexed from 0.
+        MAX_PAGE_INDEX = ((TOTAL_MEMORY * 1024) // PAGE_SIZE) - 1 # 512 pages, indexed from 0.
     
         page = random.randint(0, MAX_PAGE_INDEX) # Generate random page.
         offset = random.randint(0, PAGE_SIZE - PAYLOAD_LENGTH) # Account for length of payload.
 
         # Calculate random address which will not exceed the address space of the selected page.
         random_address = page * PAGE_SIZE + offset 
-
-        PAYLOAD_LENGTH = 16 # Bytes
-        random_payload = random.randbytes(PAYLOAD_LENGTH)
 
         # Write random payload to random address on the EEPROM.
         self.bridge.i2cMaster_WriteEx(EEPROM_ADDRESS, Flag.START_AND_STOP, bytes([(random_address >> 8) & 0xFF, random_address & 0xFF]) + random_payload)
@@ -112,6 +113,7 @@ class I2CBridge:
 
             # Record bus status.
             status_as_string = status_lookup[result["status"]]
+
             status_counts[status_as_string] = status_counts.get(status_as_string, 0) + 1
 
             if result["pass"]:
