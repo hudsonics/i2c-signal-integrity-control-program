@@ -1,6 +1,7 @@
 from datetime import datetime
 import threading
 import time
+import random
 
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -13,10 +14,11 @@ from ft4222 import I2CMaster
 from ft4222.I2CMaster import Flag
 
 from unittest.mock import MagicMock
-MOCK_HW = True # When true, makes dummy calls to controller - for testing without the board connected
+MOCK_HW = False # When true, makes dummy calls to controller - for testing without the board connected
 
 # 24SC256 hardware address - may need adjusted for 3.4 Mbps mode...
 EEPROM_ADDRESS = 0b1010000 # 0x50 - all address pin (A0, A1, A2) tied to ground on PCB.
+WRITE_CYCLE_DELAY = 0.1 # Wait fixed interval between read / writes
 
 def timestamp() -> str:
     return datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -57,11 +59,18 @@ class SetupScreen(Screen):
 
 class ControlScreen(Screen):
     # Main control screen for configuring and running I2C tests
+
+    BINDINGS = [("f5", "clear_log", "Clear Log")]
+
+    def action_clear_log(self) -> None:
+        self.query_one("#main-log", RichLog).clear()
+
     def __init__(self) -> None:
         super().__init__()
         self.is_test_running = False
         self.disconnecting = False
         self.stop_event = threading.Event()
+
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -86,6 +95,7 @@ class ControlScreen(Screen):
                 yield Select(
                     [
                         ("Idle Bus", "idle"),
+                        ("Single Read / Write", "single"),
                         ("Continous Stream", "stream"),
                         ("Bit Error Rate Test", "ber")
                     ],
@@ -142,10 +152,7 @@ class ControlScreen(Screen):
 
         self.app.pop_screen()
         connection_log = self.app.screen.query_one("#connection-log", RichLog)
-        connection_log.write(
-            f"[timestamp()] [bold red]Test board disconnected:[/bold red] {reason}"
-            "Check connections and click \"Connect\" to retry." 
-        )
+        connection_log.write(f"[timestamp()][bold red]Test board disconnected:[/bold red] {reason}. Check connections and click \"Connect\" to retry.")
 
     def log_message(self, message: str) -> None:
         log = self.query_one("#main-log", RichLog)
@@ -199,6 +206,28 @@ class ControlScreen(Screen):
                     controller.getClock() # Verify board is still connected without affecting I2C pins.
                     time.sleep(0.05)
 
+            elif test_mode == "single":
+                random_payload = random.randbytes(16)
+                random_address = random.randint(0x0000, 0x7FFF - len(random_payload) + 1)
+
+                self.app.call_from_thread(self.log_message, f"Writing random payload ({random_payload.hex().upper()}) to EEPROM address 0x{random_address:04X} at {bus_speed} kHz.")
+                # Write data
+                controller.i2cMaster_WriteEx(EEPROM_ADDRESS, Flag.START_AND_STOP, bytes([(random_address >> 8) & 0xFF, random_address & 0xFF]) + random_payload)
+
+                # Wait for internal write cycle
+                time.sleep(WRITE_CYCLE_DELAY)
+
+                self.app.call_from_thread(self.log_message, f"Reading back from EEPROM address 0x{random_address:04X} at {bus_speed} kHz")
+                # Read data back
+                controller.i2cMaster_WriteEx(EEPROM_ADDRESS, Flag.START, bytes([(random_address >> 8) & 0xFF, random_address & 0xFF])) # Set address pointer
+                readback = controller.i2cMaster_ReadEx(EEPROM_ADDRESS, Flag.REPEATED_START | Flag.STOP, len(random_payload))
+
+                # Check if match
+                if readback == random_payload:
+                    self.app.call_from_thread(self.log_message, f"[green]PASS[/green]: {readback.hex().upper()} read back from EEPROM address 0x{random_address:04X}")
+                else:
+                    self.app.call_from_thread(self.log_message, f"[red]FAIL[/red]: {readback.hex().upper()} read back from EEPROM address 0x{random_address:04X}) - expected {random_payload.hex().upper()}")
+
             elif test_mode == "stream":
                 self.app.call_from_thread(self.log_message, f"Streaming 0x5555 continuosly at {bus_speed} kHz. Press stop to end.")
 
@@ -208,7 +237,6 @@ class ControlScreen(Screen):
                     else:
                         controller.i2cMaster_WriteEx(EEPROM_ADDRESS, Flag.START_AND_STOP, bytes([0x55, 0x55]))
                         time.sleep(0.001)
-
 
             elif test_mode == "ber":
                 # PLACEHOLDER bit error rate test routine.
